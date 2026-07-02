@@ -1,0 +1,15 @@
+{
+  "name": "filedrop",
+  "version": "1.0.0",
+  "description": "Drop files or a folder in the browser, get a URL to download from another machine.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "express": "^4.19.2",
+    "multer": "^2.2.0",
+    "qrcode": "^1.5.4"
+  }
+}

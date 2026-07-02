@@ -1,0 +1,13 @@
+# Render blueprint — deploy at https://render.com → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: filedrop
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MAX_MB
+        value: "4096"        # per-file upload limit (MB)
+      - key: EXPIRY_HOURS
+        value: "0"           # 0 = keep; set e.g. 24 to auto-delete old uploads

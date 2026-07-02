@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>filedrop — upload & get a link</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:#0d1117;color:#e6edf3;
+       display:flex;justify-content:center;padding:40px 16px}
+  .wrap{width:100%;max-width:620px}
+  h1{font-size:24px;margin:0 0 6px}
+  .muted{color:#9aa4b2}.small{font-size:13px}
+  #drop{margin-top:20px;border:2px dashed #30363d;border-radius:14px;padding:38px 20px;text-align:center;
+        transition:.15s;cursor:pointer;background:#0f141b}
+  #drop.hot{border-color:#2f81f7;background:#111a29}
+  #drop b{color:#2f81f7}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+  button,.btn{font:inherit;font-weight:600;border:0;border-radius:9px;padding:10px 15px;cursor:pointer}
+  .ghost{background:#21262d;color:#e6edf3}
+  .ghost:hover{background:#2b323b}
+  .primary{background:#2f81f7;color:#fff}
+  .primary:hover{background:#4c94ff}
+  .primary:disabled{opacity:.5;cursor:default}
+  #list{margin:16px 0;list-style:none;padding:0}
+  #list li{display:flex;justify-content:space-between;gap:10px;padding:7px 12px;border:1px solid #21262d;
+           border-radius:8px;margin-bottom:6px}
+  #list span{color:#9aa4b2;white-space:nowrap}
+  .bar{height:8px;background:#21262d;border-radius:6px;overflow:hidden;margin:16px 0;display:none}
+  .bar > i{display:block;height:100%;width:0;background:#2f81f7;transition:.1s}
+  #result{display:none;margin-top:22px;padding:18px;border:1px solid #21262d;border-radius:12px;background:#0f141b}
+  .linkrow{display:flex;gap:8px;margin-top:8px}
+  .linkrow input{flex:1;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:8px;padding:10px;font:inherit}
+  .qr{margin-top:16px;border-radius:10px;background:#fff;padding:6px}
+  a{color:#2f81f7}
+  .err{color:#ff7b72;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>filedrop</h1>
+  <p class="muted">Drop files or a folder → get a link + QR → download it on any other machine.</p>
+
+  <div id="drop">
+    <p>Drag files or a folder here<br><span class="muted small">or</span></p>
+    <div class="row">
+      <button class="ghost" id="pickFiles">Choose files</button>
+      <button class="ghost" id="pickFolder">Choose a folder</button>
+    </div>
+    <p class="muted small" style="margin-top:14px">A folder is sent with its structure and downloaded back as a ZIP.</p>
+  </div>
+  <input id="fileInput" type="file" multiple hidden>
+  <input id="folderInput" type="file" webkitdirectory multiple hidden>
+
+  <ul id="list"></ul>
+  <div class="row" style="justify-content:space-between">
+    <span class="muted small" id="summary"></span>
+    <button class="primary" id="uploadBtn" disabled>Upload &amp; get link</button>
+  </div>
+
+  <div class="bar" id="bar"><i></i></div>
+  <div class="err" id="err"></div>
+
+  <div id="result">
+    <b>✅ Ready — share this link with the other machine:</b>
+    <div class="linkrow">
+      <input id="url" readonly>
+      <button class="primary" id="copyBtn">Copy</button>
+    </div>
+    <p class="small" style="margin:10px 0 0"><a id="open" target="_blank" rel="noopener">Open download page ↗</a></p>
+    <img class="qr" id="qr" alt="QR code">
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let picked = []; // [{file, path}]
+
+  const fromInput = (input, useRel) => {
+    picked = [...input.files].map(f => ({ file: f, path: useRel ? (f.webkitRelativePath || f.name) : f.name }));
+    render();
+  };
+  $('pickFiles').onclick  = () => $('fileInput').click();
+  $('pickFolder').onclick = () => $('folderInput').click();
+  $('fileInput').onchange  = e => fromInput(e.target, false);
+  $('folderInput').onchange = e => fromInput(e.target, true);
+
+  // drag & drop (recurses into dropped folders to keep structure)
+  const drop = $('drop');
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
+  drop.addEventListener('drop', async e => {
+    const items = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (items.length) { picked = []; for (const it of items) await walk(it, ''); render(); }
+    else if (e.dataTransfer.files.length) fromInput(e.dataTransfer, false);
+  });
+  function walk(entry, prefix) {
+    return new Promise(resolve => {
+      if (entry.isFile) entry.file(f => { picked.push({ file: f, path: prefix + entry.name }); resolve(); });
+      else {
+        const rd = entry.createReader();
+        rd.readEntries(async ents => { for (const en of ents) await walk(en, prefix + entry.name + '/'); resolve(); });
+      }
+    });
+  }
+
+  const fmt = b => { const u=['B','KB','MB','GB','TB']; let i=0,n=b; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(n<10&&i>0?1:0)+' '+u[i]; };
+  function render() {
+    $('list').innerHTML = picked.map(p => `<li><span style="color:#e6edf3;word-break:break-all">${p.path}</span><span>${fmt(p.file.size)}</span></li>`).join('');
+    const total = picked.reduce((s,p)=>s+p.file.size,0);
+    $('summary').textContent = picked.length ? `${picked.length} file(s) · ${fmt(total)}` : '';
+    $('uploadBtn').disabled = picked.length === 0;
+    $('result').style.display = 'none'; $('err').textContent = '';
+  }
+
+  $('uploadBtn').onclick = () => {
+    const fd = new FormData();
+    // relative path travels in the (url-encoded) field name — multer strips it from the filename
+    for (const p of picked) fd.append(encodeURIComponent(p.path), p.file, p.file.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+    $('bar').style.display = 'block'; $('uploadBtn').disabled = true; $('err').textContent = '';
+    xhr.upload.onprogress = e => { if (e.lengthComputable) $('bar').firstElementChild.style.width = (e.loaded/e.total*100)+'%'; };
+    xhr.onload = () => {
+      $('uploadBtn').disabled = false;
+      try {
+        const r = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          $('url').value = r.url; $('open').href = r.url; $('qr').src = r.qr;
+          $('result').style.display = 'block';
+        } else { $('err').textContent = r.error || ('HTTP ' + xhr.status); }
+      } catch { $('err').textContent = 'Unexpected response'; }
+      $('bar').style.display = 'none'; $('bar').firstElementChild.style.width = '0';
+    };
+    xhr.onerror = () => { $('err').textContent = 'Upload failed (network)'; $('uploadBtn').disabled = false; $('bar').style.display='none'; };
+    xhr.send(fd);
+  };
+
+  $('copyBtn').onclick = async () => {
+    try { await navigator.clipboard.writeText($('url').value); $('copyBtn').textContent = 'Copied!'; setTimeout(()=>$('copyBtn').textContent='Copy',1200); }
+    catch { $('url').select(); document.execCommand('copy'); }
+  };
+</script>
+</body>
+</html>

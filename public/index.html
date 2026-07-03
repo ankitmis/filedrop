@@ -60,6 +60,7 @@
   </div>
 
   <div class="bar" id="bar"><i></i></div>
+  <div class="muted small" id="status"></div>
   <div class="err" id="err"></div>
 
   <div id="result">
@@ -120,20 +121,33 @@
     for (const p of picked) fd.append(encodeURIComponent(p.path), p.file, p.file.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
+    xhr.timeout = 30 * 60 * 1000; // 30 min, for big/slow uploads
+    const bar = $('bar').firstElementChild;
+    const done = () => { $('uploadBtn').disabled = false; $('bar').style.display = 'none'; bar.style.width = '0'; $('status').textContent = ''; };
     $('bar').style.display = 'block'; $('uploadBtn').disabled = true; $('err').textContent = '';
-    xhr.upload.onprogress = e => { if (e.lengthComputable) $('bar').firstElementChild.style.width = (e.loaded/e.total*100)+'%'; };
+    $('status').textContent = 'Uploading…';
+    xhr.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
+      const pct = e.loaded / e.total * 100;
+      bar.style.width = pct + '%';
+      // Cloudflare buffers the whole upload, then relays to the server — so after 100%
+      // there's a wait while the server saves the file and makes the link. Say so.
+      $('status').textContent = pct >= 99.5
+        ? 'Finalizing on server… (this can take 10–60 s for large files — please wait)'
+        : `Uploading… ${pct.toFixed(0)}%`;
+    };
     xhr.onload = () => {
-      $('uploadBtn').disabled = false;
       try {
         const r = JSON.parse(xhr.responseText);
-        if (xhr.status >= 200 && xhr.status < 300) {
+        if (xhr.status >= 200 && xhr.status < 300 && r.url) {
           $('url').value = r.url; $('open').href = r.url; $('qr').src = r.qr;
           $('result').style.display = 'block';
-        } else { $('err').textContent = r.error || ('HTTP ' + xhr.status); }
-      } catch { $('err').textContent = 'Unexpected response'; }
-      $('bar').style.display = 'none'; $('bar').firstElementChild.style.width = '0';
+        } else { $('err').textContent = 'Server said: ' + (r.error || ('HTTP ' + xhr.status)); }
+      } catch { $('err').textContent = `Bad response (HTTP ${xhr.status}): ${String(xhr.responseText).slice(0,120)}`; }
+      done();
     };
-    xhr.onerror = () => { $('err').textContent = 'Upload failed (network)'; $('uploadBtn').disabled = false; $('bar').style.display='none'; };
+    xhr.onerror   = () => { $('err').textContent = 'Upload failed — network/tunnel dropped. Check the server & tunnel are still running, then retry.'; done(); };
+    xhr.ontimeout = () => { $('err').textContent = 'Upload timed out. Try again, or the file may be too large for the connection.'; done(); };
     xhr.send(fd);
   };
 
